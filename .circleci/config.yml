@@ -1,0 +1,120 @@
+aliases:
+  - &restore-dependencies-cache
+    keys:
+      - gradle-cache-v1-{{ arch }}-{{ .Branch }}-{{ checksum "build.gradle" }}
+      - gradle-cache-v1-{{ arch }}-{{ .Branch }}
+      - gradle-cache-v1
+  - &save-dependencies-cache
+    key: gradle-cache-v1-{{ arch }}-{{ .Branch }}-{{ checksum "build.gradle" }}
+    paths:
+      - ~/.gradle
+  - &defaults
+    working_directory: ~/yourproject
+    docker:
+      - image: circleci/openjdk:8-jdk-node-browsers
+version: 2
+jobs:
+  build:
+    <<: *defaults
+    steps:
+      - checkout
+      - run:
+          name: Resolve Dependencies
+          command: ./gradlew downloadDependencies
+      - run:
+          name: Build UI
+          command: ./gradlew buildUI
+      - run:
+          name: Assemble
+          command: ./gradlew assemble -PBUILD_NUMBER=$CIRCLE_BUILD_NUM -PBRANCH_NAME=$CIRCLE_BRANCH
+      - save-cache: *save-dependencies-cache
+      - persist_to_workspace:
+          root: .
+          paths: .
+  unit-test:
+    <<: *defaults
+    steps:
+      - attach_workspace:
+          at: ~/yourproject
+      - restore-cache: *restore-dependencies-cache
+      - run:
+          name: Execute Unit Tests
+          command: ./gradlew test
+      - run:
+          name: Save test results
+          command: |
+            mkdir -p ~/test-results/junit/
+            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
+          when: always
+      - store_test_results:
+          path: ~/test-results
+      - store_artifacts:
+          path: ~/test-results
+  integration-test:
+    <<: *defaults
+    steps:
+      - attach_workspace:
+          at: ~/yourproject
+      - restore-cache: *restore-dependencies-cache
+      - run:
+          name: Execute Integration Tests
+          command: ./gradlew integrationTest
+      - run:
+          name: Save test results
+          command: |
+            mkdir -p ~/test-results/junit/
+            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test-results/junit/ \;
+          when: always
+      - store_test_results:
+          path: ~/test-results
+      - store_artifacts:
+          path: ~/test-results
+  acceptance-test:
+    <<: *defaults
+    steps:
+      - attach_workspace:
+          at: ~/yourproject
+      - restore-cache: *restore-dependencies-cache
+      - run:
+          name: Execute Acceptance Tests
+          command: ./gradlew acceptanceTest
+  findbugs:
+    <<: *defaults
+    steps:
+      - attach_workspace:
+          at: ~/yourproject
+      - restore-cache: *restore-dependencies-cache
+      - run:
+          name: Execute findbugs
+          command: ./gradlew findbugsMain
+  coverage:
+    <<: *defaults
+    steps:
+      - attach_workspace:
+          at: ~/yourproject
+      - restore-cache: *restore-dependencies-cache
+      - run:
+          name: Execute Coverage Report Generation
+          command: ./gradlew jacocoTestReport
+workflows:
+  version: 2
+  produce-yourproject:
+    jobs:
+      - build
+      - unit-test:
+          requires:
+            - build
+      - integration-test:
+          requires:
+            - build
+      - acceptance-test:
+          requires:
+            - build
+      - findbugs:
+          requires:
+            - build
+      - coverage:
+          requires:
+            - unit-test
+            - integration-test
+            - acceptance-test

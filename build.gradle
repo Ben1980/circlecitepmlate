@@ -1,0 +1,222 @@
+buildscript {
+    ext {
+        springBootVersion = '2.0.4.RELEASE'
+        cucumberVersion = '0.9'
+		asciidoctorVersion = '1.5.8'
+		nodePluginVersion = '1.2.0'
+    }
+    repositories {
+        mavenCentral()
+        jcenter()
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+    dependencies {
+        classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+        classpath("com.github.samueltbrown:gradle-cucumber-plugin:${cucumberVersion}")
+		classpath("org.asciidoctor:asciidoctor-gradle-plugin:${asciidoctorVersion}")
+		classpath("com.moowork.gradle:gradle-node-plugin:${nodePluginVersion}")
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'idea'
+apply plugin: 'jacoco'
+apply plugin: 'jdepend'
+apply plugin: 'findbugs'
+apply plugin: 'project-report'
+apply plugin: 'org.springframework.boot'
+apply plugin: 'com.github.samueltbrown.cucumber'
+apply plugin: 'io.spring.dependency-management'
+apply plugin: 'org.asciidoctor.convert'
+apply plugin: 'com.moowork.node'
+apply plugin: 'com.moowork.gulp'
+
+version = '1.0.0'
+if(!"$BRANCH_NAME".isEmpty() && "$BRANCH_NAME" != "master") {
+    version = version + "-$BUILD_NUMBER" + "-SNAPSHOT"
+    PROJECT_NAME = PROJECT_NAME + " $BRANCH_NAME"
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+repositories {
+    mavenCentral()
+    jcenter()
+}
+
+wrapper {
+    gradleVersion = '4.8'
+    distributionType = Wrapper.DistributionType.ALL
+}
+
+asciidoctor {
+}
+
+findbugs {
+    toolVersion = '3.0.1'
+    ignoreFailures = true
+    effort = 'max'
+}
+
+sourceSets {
+    integrationTest {
+        java {
+            compileClasspath += main.output + test.output
+            runtimeClasspath += main.output + test.output
+            srcDir  file('src/integration-test/java')
+        }
+        resources {
+            srcDirs file('src/integration-test/resources')
+        }
+    }
+    acceptanceTest {
+        java {
+            compileClasspath += main.output + test.output
+            runtimeClasspath += main.output + test.output
+            srcDirs file('src/acceptance-test/java')
+        }
+        resources {
+            srcDirs file('src/acceptance-test/resources')
+        }
+    }
+}
+
+configurations {
+    integrationTestCompile.extendsFrom testCompile
+    integrationTestRuntime.extendsFrom testRuntime
+    acceptanceTestCompile.extendsFrom testCompile
+    acceptanceTestRuntime.extendsFrom testRuntime
+}
+
+task integrationTest(type: Test) {
+    description = "Runs Integration Tests"
+    setTestClassesDirs(sourceSets.integrationTest.output.getClassesDirs())
+    classpath += sourceSets.integrationTest.runtimeClasspath
+    outputs.upToDateWhen { false }
+}
+
+task acceptanceTest(type: Test) {
+    description = "Runs Acceptance Tests"
+    setTestClassesDirs(sourceSets.acceptanceTest.output.getClassesDirs())
+    classpath += sourceSets.acceptanceTest.runtimeClasspath
+    outputs.upToDateWhen { false }
+}
+
+task downloadDependencies() {
+    description 'Download all dependencies to the Gradle cache'
+    doLast {
+        configurations.findAll { it.canBeResolved }.files
+    }
+}
+
+tasks.withType(Test) {
+    reports.html.setDestination(file("${reporting.baseDir}/${name}"))
+}
+
+test {
+    ignoreFailures = true
+    exclude 'com/yourproject/UnitTestsRunner.class'
+
+    jacoco {
+        destinationFile = file("$buildDir/jacoco/test.exec")
+    }
+}
+
+integrationTest {
+    ignoreFailures = true
+    exclude 'com/yourproject/IntegrationTestsRunner.class'
+
+    jacoco {
+        destinationFile = file("$buildDir/jacoco/test.exec")
+    }
+}
+
+acceptanceTest {
+    ignoreFailures = true
+    exclude 'com/yourproject/AcceptanceTestsRunner.class'
+    environment "DATABASE_URL", "postgres://develop:develop@localhost:5432/develop"
+
+    jacoco {
+        destinationFile = file("$buildDir/jacoco/test.exec")
+    }
+}
+
+pitest {
+    targetClasses = ['com.yourproject.*']
+    pitestVersion = '1.3.0'
+    threads = 4
+    outputFormats = ['XML', 'HTML']
+    testSourceSets = [sourceSets.test, sourceSets.integrationTest, sourceSets.acceptanceTest]
+}
+
+node {
+	version = '10.11.0'
+	npmVersion = '6.4.1'
+	download = true
+	workDir = file("${project.buildDir}/yourproject-frontend")
+	npmWorkDir = file("${project.buildDir}/yourproject-frontend")
+	nodeModulesDir = file("${project.projectDir}/yourproject-frontend")
+}
+
+gulp {
+	workDir = file("${project.projectDir}/yourproject-frontend")
+	colors = true
+	bufferOutput = true
+}
+
+task rebuildSASS(type: NpmTask) {
+  args = ['rebuild', 'node-sass']
+}
+
+rebuildSASS.dependsOn npmInstall
+
+task buildUI(type: GulpTask) {
+  args = ['--production']
+}
+
+buildUI.dependsOn rebuildSASS
+
+check.dependsOn integrationTest
+integrationTest.mustRunAfter test
+
+check.dependsOn acceptanceTest
+acceptanceTest.mustRunAfter integrationTest
+
+dependencies {
+    annotationProcessor (
+		    ['org.projectlombok:lombok']
+	  )
+
+    compileOnly (
+        ['org.projectlombok:lombok']
+    )
+
+    compile (
+        ['org.springframework.boot:spring-boot-starter-data-jpa'],
+        ['org.springframework.boot:spring-boot-starter-web'],
+        ['org.springframework.boot:spring-boot-starter-jetty'],
+        ['org.springframework.boot:spring-boot-starter-security'],
+        ['org.springframework.boot:spring-boot-starter-thymeleaf'],
+        ['org.apache.commons:commons-dbcp2']
+    )
+
+    testCompile (
+        ['org.springframework.boot:spring-boot-starter-test'],
+        ['org.springframework.security:spring-security-test'],
+        ['net.sourceforge.htmlunit:htmlunit'],
+        ["io.cucumber:cucumber-junit:${cucumberLibraryVersion}"],
+        ["io.cucumber:cucumber-java8:${cucumberLibraryVersion}"],
+        ["io.cucumber:cucumber-spring:${cucumberLibraryVersion}"]
+    )
+
+    runtime (
+        ['org.springframework.boot:spring-boot-devtools'],
+        ['com.h2database:h2'],
+        ['org.postgresql:postgresql'],
+        ['org.springframework.boot:spring-boot-properties-migrator']
+    )
+}
